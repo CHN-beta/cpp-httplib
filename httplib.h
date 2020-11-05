@@ -49,11 +49,7 @@
 #endif
 
 #ifndef CPPHTTPLIB_IDLE_INTERVAL_USECOND
-#ifdef _WIN32
-#define CPPHTTPLIB_IDLE_INTERVAL_USECOND 10000
-#else
 #define CPPHTTPLIB_IDLE_INTERVAL_USECOND 0
-#endif
 #endif
 
 #ifndef CPPHTTPLIB_REQUEST_URI_MAX_LENGTH
@@ -91,78 +87,13 @@
  * Headers
  */
 
-#ifdef _WIN32
-#ifndef _CRT_SECURE_NO_WARNINGS
-#define _CRT_SECURE_NO_WARNINGS
-#endif //_CRT_SECURE_NO_WARNINGS
-
-#ifndef _CRT_NONSTDC_NO_DEPRECATE
-#define _CRT_NONSTDC_NO_DEPRECATE
-#endif //_CRT_NONSTDC_NO_DEPRECATE
-
-#if defined(_MSC_VER)
-#ifdef _WIN64
-using ssize_t = __int64;
-#else
-using ssize_t = int;
-#endif
-
-#if _MSC_VER < 1900
-#define snprintf _snprintf_s
-#endif
-#endif // _MSC_VER
-
-#ifndef S_ISREG
-#define S_ISREG(m) (((m)&S_IFREG) == S_IFREG)
-#endif // S_ISREG
-
-#ifndef S_ISDIR
-#define S_ISDIR(m) (((m)&S_IFDIR) == S_IFDIR)
-#endif // S_ISDIR
-
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif // NOMINMAX
-
-#include <io.h>
-#include <winsock2.h>
-
-#include <wincrypt.h>
-#include <ws2tcpip.h>
-
-#ifndef WSA_FLAG_NO_HANDLE_INHERIT
-#define WSA_FLAG_NO_HANDLE_INHERIT 0x80
-#endif
-
-#ifdef _MSC_VER
-#pragma comment(lib, "ws2_32.lib")
-#pragma comment(lib, "crypt32.lib")
-#pragma comment(lib, "cryptui.lib")
-#endif
-
-#ifndef strcasecmp
-#define strcasecmp _stricmp
-#endif // strcasecmp
-
-using socket_t = SOCKET;
-#ifdef CPPHTTPLIB_USE_POLL
-#define poll(fds, nfds, timeout) WSAPoll(fds, nfds, timeout)
-#endif
-
-#else // not _WIN32
-
 #include <arpa/inet.h>
 #include <cstring>
 #include <ifaddrs.h>
 #include <netdb.h>
 #include <netinet/in.h>
-#ifdef __linux__
 #include <resolv.h>
-#endif
 #include <netinet/tcp.h>
-#ifdef CPPHTTPLIB_USE_POLL
-#include <poll.h>
-#endif
 #include <csignal>
 #include <pthread.h>
 #include <sys/select.h>
@@ -171,7 +102,6 @@ using socket_t = SOCKET;
 
 using socket_t = int;
 #define INVALID_SOCKET (-1)
-#endif //_WIN32
 
 #include <algorithm>
 #include <array>
@@ -196,40 +126,18 @@ using socket_t = int;
 #include <sys/stat.h>
 #include <thread>
 
-#ifdef CPPHTTPLIB_OPENSSL_SUPPORT
 #include <openssl/err.h>
 #include <openssl/md5.h>
 #include <openssl/ssl.h>
 #include <openssl/x509v3.h>
 
-#if defined(_WIN32) && defined(OPENSSL_USE_APPLINK)
-#include <openssl/applink.c>
-#endif
-
 #include <iomanip>
 #include <iostream>
 #include <sstream>
 
-#if OPENSSL_VERSION_NUMBER < 0x1010100fL
-#error Sorry, OpenSSL versions prior to 1.1.1 are not supported
-#endif
-
-#if OPENSSL_VERSION_NUMBER < 0x10100000L
-#include <openssl/crypto.h>
-inline const unsigned char *ASN1_STRING_get0_data(const ASN1_STRING *asn1) {
-  return M_ASN1_STRING_data(asn1);
-}
-#endif
-#endif
-
-#ifdef CPPHTTPLIB_ZLIB_SUPPORT
 #include <zlib.h>
-#endif
-
-#ifdef CPPHTTPLIB_BROTLI_SUPPORT
 #include <brotli/decode.h>
 #include <brotli/encode.h>
-#endif
 
 /*
  * Declaration
@@ -237,27 +145,6 @@ inline const unsigned char *ASN1_STRING_get0_data(const ASN1_STRING *asn1) {
 namespace httplib {
 
 namespace detail {
-
-/*
- * Backport std::make_unique from C++14.
- *
- * NOTE: This code came up with the following stackoverflow post:
- * https://stackoverflow.com/questions/10149840/c-arrays-and-make-unique
- *
- */
-
-template <class T, class... Args>
-typename std::enable_if<!std::is_array<T>::value, std::unique_ptr<T>>::type
-make_unique(Args &&... args) {
-  return std::unique_ptr<T>(new T(std::forward<Args>(args)...));
-}
-
-template <class T>
-typename std::enable_if<std::is_array<T>::value, std::unique_ptr<T>>::type
-make_unique(std::size_t n) {
-  typedef typename std::remove_extent<T>::type RT;
-  return std::unique_ptr<T>(new RT[n]);
-}
 
 struct ci {
   bool operator()(const std::string &s1, const std::string &s2) const {
@@ -387,14 +274,11 @@ struct Request {
   ContentProvider content_provider;
   Progress progress;
 
-#ifdef CPPHTTPLIB_OPENSSL_SUPPORT
   const SSL *ssl;
-#endif
 
   bool has_header(const char *key) const;
   std::string get_header_value(const char *key, size_t id = 0) const;
-  template <typename T>
-  T get_header_value(const char *key, size_t id = 0) const;
+  template <typename T> T get_header_value(const char *key, size_t id = 0) const;
   size_t get_header_value_count(const char *key) const;
   void set_header(const char *key, const char *val);
   void set_header(const char *key, const std::string &val);
@@ -421,8 +305,7 @@ struct Response {
 
   bool has_header(const char *key) const;
   std::string get_header_value(const char *key, size_t id = 0) const;
-  template <typename T>
-  T get_header_value(const char *key, size_t id = 0) const;
+  template <typename T> T get_header_value(const char *key, size_t id = 0) const;
   size_t get_header_value_count(const char *key) const;
   void set_header(const char *key, const char *val);
   void set_header(const char *key, const std::string &val);
@@ -566,20 +449,8 @@ using SocketOptions = std::function<void(socket_t sock)>;
 
 inline void default_socket_options(socket_t sock) {
   int yes = 1;
-#ifdef _WIN32
-  setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, reinterpret_cast<char *>(&yes),
-             sizeof(yes));
-  setsockopt(sock, SOL_SOCKET, SO_EXCLUSIVEADDRUSE,
-             reinterpret_cast<char *>(&yes), sizeof(yes));
-#else
-#ifdef SO_REUSEPORT
   setsockopt(sock, SOL_SOCKET, SO_REUSEPORT, reinterpret_cast<void *>(&yes),
              sizeof(yes));
-#else
-  setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, reinterpret_cast<void *>(&yes),
-             sizeof(yes));
-#endif
-#endif
 }
 
 class Server {
@@ -861,9 +732,7 @@ public:
 
   void set_basic_auth(const char *username, const char *password);
   void set_bearer_token_auth(const char *token);
-#ifdef CPPHTTPLIB_OPENSSL_SUPPORT
   void set_digest_auth(const char *username, const char *password);
-#endif
 
   void set_keep_alive(bool on);
   void set_follow_location(bool on);
@@ -877,22 +746,16 @@ public:
   void set_proxy(const char *host, int port);
   void set_proxy_basic_auth(const char *username, const char *password);
   void set_proxy_bearer_token_auth(const char *token);
-#ifdef CPPHTTPLIB_OPENSSL_SUPPORT
   void set_proxy_digest_auth(const char *username, const char *password);
-#endif
 
-#ifdef CPPHTTPLIB_OPENSSL_SUPPORT
   void enable_server_certificate_verification(bool enabled);
-#endif
 
   void set_logger(Logger logger);
 
 protected:
   struct Socket {
     socket_t sock = INVALID_SOCKET;
-#ifdef CPPHTTPLIB_OPENSSL_SUPPORT
     SSL *ssl = nullptr;
-#endif
 
     bool is_open() const { return sock != INVALID_SOCKET; }
   };
@@ -937,10 +800,8 @@ protected:
   std::string basic_auth_username_;
   std::string basic_auth_password_;
   std::string bearer_token_auth_token_;
-#ifdef CPPHTTPLIB_OPENSSL_SUPPORT
   std::string digest_auth_username_;
   std::string digest_auth_password_;
-#endif
 
   bool keep_alive_ = false;
   bool follow_location_ = false;
@@ -959,14 +820,10 @@ protected:
   std::string proxy_basic_auth_username_;
   std::string proxy_basic_auth_password_;
   std::string proxy_bearer_token_auth_token_;
-#ifdef CPPHTTPLIB_OPENSSL_SUPPORT
   std::string proxy_digest_auth_username_;
   std::string proxy_digest_auth_password_;
-#endif
 
-#ifdef CPPHTTPLIB_OPENSSL_SUPPORT
   bool server_certificate_verification_ = true;
-#endif
 
   Logger logger_;
 
@@ -1096,9 +953,7 @@ public:
 
   void set_basic_auth(const char *username, const char *password);
   void set_bearer_token_auth(const char *token);
-#ifdef CPPHTTPLIB_OPENSSL_SUPPORT
   void set_digest_auth(const char *username, const char *password);
-#endif
 
   void set_keep_alive(bool on);
   void set_follow_location(bool on);
@@ -1112,18 +967,13 @@ public:
   void set_proxy(const char *host, int port);
   void set_proxy_basic_auth(const char *username, const char *password);
   void set_proxy_bearer_token_auth(const char *token);
-#ifdef CPPHTTPLIB_OPENSSL_SUPPORT
   void set_proxy_digest_auth(const char *username, const char *password);
-#endif
 
-#ifdef CPPHTTPLIB_OPENSSL_SUPPORT
   void enable_server_certificate_verification(bool enabled);
-#endif
 
   void set_logger(Logger logger);
 
   // SSL
-#ifdef CPPHTTPLIB_OPENSSL_SUPPORT
   void set_ca_cert_path(const char *ca_cert_file_path,
                         const char *ca_cert_dir_path = nullptr);
 
@@ -1132,17 +982,13 @@ public:
   long get_openssl_verify_result() const;
 
   SSL_CTX *ssl_context() const;
-#endif
 
 private:
   std::unique_ptr<ClientImpl> cli_;
 
-#ifdef CPPHTTPLIB_OPENSSL_SUPPORT
   bool is_ssl_ = false;
-#endif
 }; // namespace httplib
 
-#ifdef CPPHTTPLIB_OPENSSL_SUPPORT
 class SSLServer : public Server {
 public:
   SSLServer(const char *cert_path, const char *private_key_path,
@@ -1219,7 +1065,6 @@ private:
 
   friend class ClientImpl;
 };
-#endif
 
 // ----------------------------------------------------------------------------
 
@@ -1585,11 +1430,7 @@ private:
 };
 
 inline int close_socket(socket_t sock) {
-#ifdef _WIN32
-  return closesocket(sock);
-#else
   return close(sock);
-#endif
 }
 
 template <typename T> inline ssize_t handle_EINTR(T fn) {
@@ -1603,15 +1444,6 @@ template <typename T> inline ssize_t handle_EINTR(T fn) {
 }
 
 inline ssize_t select_read(socket_t sock, time_t sec, time_t usec) {
-#ifdef CPPHTTPLIB_USE_POLL
-  struct pollfd pfd_read;
-  pfd_read.fd = sock;
-  pfd_read.events = POLLIN;
-
-  auto timeout = static_cast<int>(sec * 1000 + usec / 1000);
-
-  return handle_EINTR([&]() { return poll(&pfd_read, 1, timeout); });
-#else
   fd_set fds;
   FD_ZERO(&fds);
   FD_SET(sock, &fds);
@@ -1623,19 +1455,9 @@ inline ssize_t select_read(socket_t sock, time_t sec, time_t usec) {
   return handle_EINTR([&]() {
     return select(static_cast<int>(sock + 1), &fds, nullptr, nullptr, &tv);
   });
-#endif
 }
 
 inline ssize_t select_write(socket_t sock, time_t sec, time_t usec) {
-#ifdef CPPHTTPLIB_USE_POLL
-  struct pollfd pfd_read;
-  pfd_read.fd = sock;
-  pfd_read.events = POLLOUT;
-
-  auto timeout = static_cast<int>(sec * 1000 + usec / 1000);
-
-  return handle_EINTR([&]() { return poll(&pfd_read, 1, timeout); });
-#else
   fd_set fds;
   FD_ZERO(&fds);
   FD_SET(sock, &fds);
@@ -1647,28 +1469,9 @@ inline ssize_t select_write(socket_t sock, time_t sec, time_t usec) {
   return handle_EINTR([&]() {
     return select(static_cast<int>(sock + 1), nullptr, &fds, nullptr, &tv);
   });
-#endif
 }
 
 inline bool wait_until_socket_is_ready(socket_t sock, time_t sec, time_t usec) {
-#ifdef CPPHTTPLIB_USE_POLL
-  struct pollfd pfd_read;
-  pfd_read.fd = sock;
-  pfd_read.events = POLLIN | POLLOUT;
-
-  auto timeout = static_cast<int>(sec * 1000 + usec / 1000);
-
-  auto poll_res = handle_EINTR([&]() { return poll(&pfd_read, 1, timeout); });
-
-  if (poll_res > 0 && pfd_read.revents & (POLLIN | POLLOUT)) {
-    int error = 0;
-    socklen_t len = sizeof(error);
-    auto res = getsockopt(sock, SOL_SOCKET, SO_ERROR,
-                          reinterpret_cast<char *>(&error), &len);
-    return res >= 0 && !error;
-  }
-  return false;
-#else
   fd_set fdsr;
   FD_ZERO(&fdsr);
   FD_SET(sock, &fdsr);
@@ -1692,7 +1495,6 @@ inline bool wait_until_socket_is_ready(socket_t sock, time_t sec, time_t usec) {
            !error;
   }
   return false;
-#endif
 }
 
 class SocketStream : public Stream {
@@ -1715,7 +1517,6 @@ private:
   time_t write_timeout_usec_;
 };
 
-#ifdef CPPHTTPLIB_OPENSSL_SUPPORT
 class SSLSocketStream : public Stream {
 public:
   SSLSocketStream(socket_t sock, SSL *ssl, time_t read_timeout_sec,
@@ -1737,7 +1538,6 @@ private:
   time_t write_timeout_sec_;
   time_t write_timeout_usec_;
 };
-#endif
 
 class BufferStream : public Stream {
 public:
@@ -1851,34 +1651,8 @@ socket_t create_socket(const char *host, int port, int socket_flags,
 
   for (auto rp = result; rp; rp = rp->ai_next) {
     // Create a socket
-#ifdef _WIN32
-    auto sock = WSASocketW(rp->ai_family, rp->ai_socktype, rp->ai_protocol,
-                           nullptr, 0, WSA_FLAG_NO_HANDLE_INHERIT);
-    /**
-     * Since the WSA_FLAG_NO_HANDLE_INHERIT is only supported on Windows 7 SP1
-     * and above the socket creation fails on older Windows Systems.
-     *
-     * Let's try to create a socket the old way in this case.
-     *
-     * Reference:
-     * https://docs.microsoft.com/en-us/windows/win32/api/winsock2/nf-winsock2-wsasocketa
-     *
-     * WSA_FLAG_NO_HANDLE_INHERIT:
-     * This flag is supported on Windows 7 with SP1, Windows Server 2008 R2 with
-     * SP1, and later
-     *
-     */
-    if (sock == INVALID_SOCKET) {
-      sock = socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
-    }
-#else
     auto sock = socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
-#endif
     if (sock == INVALID_SOCKET) { continue; }
-
-#ifndef _WIN32
-    if (fcntl(sock, F_SETFD, FD_CLOEXEC) == -1) { continue; }
-#endif
 
     if (tcp_nodelay) {
       int yes = 1;
@@ -1908,22 +1682,13 @@ socket_t create_socket(const char *host, int port, int socket_flags,
 }
 
 inline void set_nonblocking(socket_t sock, bool nonblocking) {
-#ifdef _WIN32
-  auto flags = nonblocking ? 1UL : 0UL;
-  ioctlsocket(sock, FIONBIO, &flags);
-#else
   auto flags = fcntl(sock, F_GETFL, 0);
   fcntl(sock, F_SETFL,
         nonblocking ? (flags | O_NONBLOCK) : (flags & (~O_NONBLOCK)));
-#endif
 }
 
 inline bool is_connection_error() {
-#ifdef _WIN32
-  return WSAGetLastError() != WSAEWOULDBLOCK;
-#else
   return errno != EINPROGRESS;
-#endif
 }
 
 inline bool bind_ip_address(socket_t sock, const char *host) {
@@ -1950,11 +1715,6 @@ inline bool bind_ip_address(socket_t sock, const char *host) {
   return ret;
 }
 
-#if !defined _WIN32 && !defined ANDROID
-#define USE_IF2IP
-#endif
-
-#ifdef USE_IF2IP
 inline std::string if2ip(const std::string &ifn) {
   struct ifaddrs *ifap;
   getifaddrs(&ifap);
@@ -1973,7 +1733,6 @@ inline std::string if2ip(const std::string &ifn) {
   freeifaddrs(ifap);
   return std::string();
 }
-#endif
 
 inline socket_t create_client_socket(const char *host, int port,
                                      bool tcp_nodelay,
@@ -1984,14 +1743,12 @@ inline socket_t create_client_socket(const char *host, int port,
       host, port, 0, tcp_nodelay, std::move(socket_options),
       [&](socket_t sock, struct addrinfo &ai) -> bool {
         if (!intf.empty()) {
-#ifdef USE_IF2IP
           auto ip = if2ip(intf);
           if (ip.empty()) { ip = intf; }
           if (!bind_ip_address(sock, ip.c_str())) {
             error = Error::BindIPAddress;
             return false;
           }
-#endif
         }
 
         set_nonblocking(sock, true);
@@ -2179,17 +1936,13 @@ inline EncodingType encoding_type(const Request &req, const Response &res) {
   const auto &s = req.get_header_value("Accept-Encoding");
   (void)(s);
 
-#ifdef CPPHTTPLIB_BROTLI_SUPPORT
   // TODO: 'Accept-Encoding' has br, not br;q=0
   ret = s.find("br") != std::string::npos;
   if (ret) { return EncodingType::Brotli; }
-#endif
 
-#ifdef CPPHTTPLIB_ZLIB_SUPPORT
   // TODO: 'Accept-Encoding' has gzip, not gzip;q=0
   ret = s.find("gzip") != std::string::npos;
   if (ret) { return EncodingType::Gzip; }
-#endif
 
   return EncodingType::None;
 }
@@ -2225,7 +1978,6 @@ public:
   }
 };
 
-#ifdef CPPHTTPLIB_ZLIB_SUPPORT
 class gzip_compressor : public compressor {
 public:
   gzip_compressor() {
@@ -2327,9 +2079,7 @@ private:
   bool is_valid_ = false;
   z_stream strm_;
 };
-#endif
 
-#ifdef CPPHTTPLIB_BROTLI_SUPPORT
 class brotli_compressor : public compressor {
 public:
   brotli_compressor() {
@@ -2424,7 +2174,6 @@ private:
   BrotliDecoderResult decoder_r;
   BrotliDecoderState *decoder_s = nullptr;
 };
-#endif
 
 inline bool has_header(const Headers &headers, const char *key) {
   return headers.find(key) != headers.end();
@@ -2621,19 +2370,9 @@ bool prepare_content_receiver(T &x, int &status,
 
     if (encoding.find("gzip") != std::string::npos ||
         encoding.find("deflate") != std::string::npos) {
-#ifdef CPPHTTPLIB_ZLIB_SUPPORT
-      decompressor = detail::make_unique<gzip_decompressor>();
-#else
-      status = 415;
-      return false;
-#endif
+      decompressor = std::make_unique<gzip_decompressor>();
     } else if (encoding.find("br") != std::string::npos) {
-#ifdef CPPHTTPLIB_BROTLI_SUPPORT
-      decompressor = detail::make_unique<brotli_decompressor>();
-#else
-      status = 415;
-      return false;
-#endif
+      decompressor = std::make_unique<brotli_decompressor>();
     }
 
     if (decompressor) {
@@ -3304,7 +3043,6 @@ inline bool has_crlf(const char *s) {
   return false;
 }
 
-#ifdef CPPHTTPLIB_OPENSSL_SUPPORT
 template <typename CTX, typename Init, typename Update, typename Final>
 inline std::string message_digest(const std::string &s, Init init,
                                   Update update, Final final,
@@ -3338,50 +3076,7 @@ inline std::string SHA_512(const std::string &s) {
   return message_digest<SHA512_CTX>(s, SHA512_Init, SHA512_Update, SHA512_Final,
                                     SHA512_DIGEST_LENGTH);
 }
-#endif
 
-#ifdef _WIN32
-#ifdef CPPHTTPLIB_OPENSSL_SUPPORT
-// NOTE: This code came up with the following stackoverflow post:
-// https://stackoverflow.com/questions/9507184/can-openssl-on-windows-use-the-system-certificate-store
-inline bool load_system_certs_on_windows(X509_STORE *store) {
-  auto hStore = CertOpenSystemStoreW((HCRYPTPROV_LEGACY)NULL, L"ROOT");
-
-  if (!hStore) { return false; }
-
-  PCCERT_CONTEXT pContext = NULL;
-  while (pContext = CertEnumCertificatesInStore(hStore, pContext)) {
-    auto encoded_cert =
-        static_cast<const unsigned char *>(pContext->pbCertEncoded);
-
-    auto x509 = d2i_X509(NULL, &encoded_cert, pContext->cbCertEncoded);
-    if (x509) {
-      X509_STORE_add_cert(store, x509);
-      X509_free(x509);
-    }
-  }
-
-  CertFreeCertificateContext(pContext);
-  CertCloseStore(hStore, 0);
-
-  return true;
-}
-#endif
-
-class WSInit {
-public:
-  WSInit() {
-    WSADATA wsaData;
-    WSAStartup(0x0002, &wsaData);
-  }
-
-  ~WSInit() { WSACleanup(); }
-};
-
-static WSInit wsinit_;
-#endif
-
-#ifdef CPPHTTPLIB_OPENSSL_SUPPORT
 inline std::pair<std::string, std::string> make_digest_authentication_header(
     const Request &req, const std::map<std::string, std::string> &auth,
     size_t cnonce_count, const std::string &cnonce, const std::string &username,
@@ -3429,7 +3124,6 @@ inline std::pair<std::string, std::string> make_digest_authentication_header(
   auto key = is_proxy ? "Proxy-Authorization" : "Authorization";
   return std::make_pair(key, field);
 }
-#endif
 
 inline bool parse_www_authenticate(const Response &res,
                                    std::map<std::string, std::string> &auth,
@@ -3693,11 +3387,7 @@ inline ssize_t Stream::write_format(const char *fmt, const Args &... args) {
   const auto bufsiz = 2048;
   std::array<char, bufsiz> buf;
 
-#if defined(_MSC_VER) && _MSC_VER < 1900
-  auto sn = _snprintf_s(buf.data(), bufsiz - 1, buf.size() - 1, fmt, args...);
-#else
   auto sn = snprintf(buf.data(), buf.size() - 1, fmt, args...);
-#endif
   if (sn <= 0) { return sn; }
 
   auto n = static_cast<size_t>(sn);
@@ -3707,14 +3397,8 @@ inline ssize_t Stream::write_format(const char *fmt, const Args &... args) {
 
     while (n >= glowable_buf.size() - 1) {
       glowable_buf.resize(glowable_buf.size() * 2);
-#if defined(_MSC_VER) && _MSC_VER < 1900
-      n = static_cast<size_t>(_snprintf_s(&glowable_buf[0], glowable_buf.size(),
-                                          glowable_buf.size() - 1, fmt,
-                                          args...));
-#else
       n = static_cast<size_t>(
           snprintf(&glowable_buf[0], glowable_buf.size() - 1, fmt, args...));
-#endif
     }
     return write(&glowable_buf[0], n);
   } else {
@@ -3747,27 +3431,13 @@ inline bool SocketStream::is_writable() const {
 inline ssize_t SocketStream::read(char *ptr, size_t size) {
   if (!is_readable()) { return -1; }
 
-#ifdef _WIN32
-  if (size > static_cast<size_t>((std::numeric_limits<int>::max)())) {
-    return -1;
-  }
-  return recv(sock_, ptr, static_cast<int>(size), 0);
-#else
   return handle_EINTR([&]() { return recv(sock_, ptr, size, 0); });
-#endif
 }
 
 inline ssize_t SocketStream::write(const char *ptr, size_t size) {
   if (!is_writable()) { return -1; }
 
-#ifdef _WIN32
-  if (size > static_cast<size_t>((std::numeric_limits<int>::max)())) {
-    return -1;
-  }
-  return send(sock_, ptr, static_cast<int>(size), 0);
-#else
   return handle_EINTR([&]() { return send(sock_, ptr, size, 0); });
-#endif
 }
 
 inline void SocketStream::get_remote_ip_and_port(std::string &ip,
@@ -3781,11 +3451,7 @@ inline bool BufferStream::is_readable() const { return true; }
 inline bool BufferStream::is_writable() const { return true; }
 
 inline ssize_t BufferStream::read(char *ptr, size_t size) {
-#if defined(_MSC_VER) && _MSC_VER <= 1900
-  auto len_read = buffer._Copy_s(ptr, size, size, position);
-#else
   auto len_read = buffer.copy(ptr, size, position);
-#endif
   position += static_cast<size_t>(len_read);
   return static_cast<ssize_t>(len_read);
 }
@@ -3807,9 +3473,7 @@ inline Server::Server()
     : new_task_queue(
           [] { return new ThreadPool(CPPHTTPLIB_THREAD_POOL_COUNT); }),
       svr_sock_(INVALID_SOCKET), is_running_(false) {
-#ifndef _WIN32
   signal(SIGPIPE, SIG_IGN);
-#endif
 }
 
 inline Server::~Server() {}
@@ -4108,15 +3772,11 @@ inline bool Server::write_response(Stream &strm, bool close_connection,
       std::unique_ptr<detail::compressor> compressor;
 
       if (type == detail::EncodingType::Gzip) {
-#ifdef CPPHTTPLIB_ZLIB_SUPPORT
-        compressor = detail::make_unique<detail::gzip_compressor>();
+        compressor = std::make_unique<detail::gzip_compressor>();
         res.set_header("Content-Encoding", "gzip");
-#endif
       } else if (type == detail::EncodingType::Brotli) {
-#ifdef CPPHTTPLIB_BROTLI_SUPPORT
-        compressor = detail::make_unique<detail::brotli_compressor>();
+        compressor = std::make_unique<detail::brotli_compressor>();
         res.set_header("Content-Encoding", "brotli");
-#endif
       }
 
       if (compressor) {
@@ -4198,15 +3858,11 @@ Server::write_content_with_provider(Stream &strm, const Request &req,
 
       std::unique_ptr<detail::compressor> compressor;
       if (type == detail::EncodingType::Gzip) {
-#ifdef CPPHTTPLIB_ZLIB_SUPPORT
-        compressor = detail::make_unique<detail::gzip_compressor>();
-#endif
+        compressor = std::make_unique<detail::gzip_compressor>();
       } else if (type == detail::EncodingType::Brotli) {
-#ifdef CPPHTTPLIB_BROTLI_SUPPORT
-        compressor = detail::make_unique<detail::brotli_compressor>();
-#endif
+        compressor = std::make_unique<detail::brotli_compressor>();
       } else {
-        compressor = detail::make_unique<detail::nocompressor>();
+        compressor = std::make_unique<detail::nocompressor>();
       }
       assert(compressor != nullptr);
 
@@ -4397,18 +4053,14 @@ inline bool Server::listen_internal() {
     std::unique_ptr<TaskQueue> task_queue(new_task_queue());
 
     while (svr_sock_ != INVALID_SOCKET) {
-#ifndef _WIN32
       if (idle_interval_sec_ > 0 || idle_interval_usec_ > 0) {
-#endif
         auto val = detail::select_read(svr_sock_, idle_interval_sec_,
                                        idle_interval_usec_);
         if (val == 0) { // Timeout
           task_queue->on_idle();
           continue;
         }
-#ifndef _WIN32
       }
-#endif
       socket_t sock = accept(svr_sock_, nullptr, nullptr);
 
       if (sock == INVALID_SOCKET) {
@@ -4427,11 +4079,7 @@ inline bool Server::listen_internal() {
         break;
       }
 
-#if __cplusplus > 201703L
       task_queue->enqueue([=, this]() { process_and_close_socket(sock); });
-#else
-      task_queue->enqueue([=]() { process_and_close_socket(sock); });
-#endif
     }
 
     task_queue->shutdown();
@@ -4676,10 +4324,8 @@ inline void ClientImpl::copy_settings(const ClientImpl &rhs) {
   basic_auth_username_ = rhs.basic_auth_username_;
   basic_auth_password_ = rhs.basic_auth_password_;
   bearer_token_auth_token_ = rhs.bearer_token_auth_token_;
-#ifdef CPPHTTPLIB_OPENSSL_SUPPORT
   digest_auth_username_ = rhs.digest_auth_username_;
   digest_auth_password_ = rhs.digest_auth_password_;
-#endif
   keep_alive_ = rhs.keep_alive_;
   follow_location_ = rhs.follow_location_;
   tcp_nodelay_ = rhs.tcp_nodelay_;
@@ -4692,13 +4338,9 @@ inline void ClientImpl::copy_settings(const ClientImpl &rhs) {
   proxy_basic_auth_username_ = rhs.proxy_basic_auth_username_;
   proxy_basic_auth_password_ = rhs.proxy_basic_auth_password_;
   proxy_bearer_token_auth_token_ = rhs.proxy_bearer_token_auth_token_;
-#ifdef CPPHTTPLIB_OPENSSL_SUPPORT
   proxy_digest_auth_username_ = rhs.proxy_digest_auth_username_;
   proxy_digest_auth_password_ = rhs.proxy_digest_auth_password_;
-#endif
-#ifdef CPPHTTPLIB_OPENSSL_SUPPORT
   server_certificate_verification_ = rhs.server_certificate_verification_;
-#endif
   logger_ = rhs.logger_;
 }
 
@@ -4773,7 +4415,6 @@ inline bool ClientImpl::send(const Request &req, Response &res) {
     if (!is_alive) {
       if (!create_and_connect_socket(socket_)) { return false; }
 
-#ifdef CPPHTTPLIB_OPENSSL_SUPPORT
       // TODO: refactoring
       if (is_ssl()) {
         auto &scli = static_cast<SSLClient &>(*this);
@@ -4786,7 +4427,6 @@ inline bool ClientImpl::send(const Request &req, Response &res) {
 
         if (!scli.initialize_ssl(socket_)) { return false; }
       }
-#endif
     }
   }
 
@@ -4828,7 +4468,6 @@ inline bool ClientImpl::handle_request(Stream &strm, const Request &req,
     ret = redirect(req, res);
   }
 
-#ifdef CPPHTTPLIB_OPENSSL_SUPPORT
   if ((res.status == 401 || res.status == 407) &&
       req.authorization_count_ < 5) {
     auto is_proxy = res.status == 407;
@@ -4855,7 +4494,6 @@ inline bool ClientImpl::handle_request(Stream &strm, const Request &req,
       }
     }
   }
-#endif
 
   return ret;
 }
@@ -4897,15 +4535,11 @@ inline bool ClientImpl::redirect(const Request &req, Response &res) {
     return detail::redirect(*this, req, res, next_path);
   } else {
     if (next_scheme == "https") {
-#ifdef CPPHTTPLIB_OPENSSL_SUPPORT
       SSLClient cli(next_host.c_str(), next_port);
       cli.copy_settings(*this);
       auto ret = detail::redirect(cli, req, res, next_path);
       if (!ret) { error_ = cli.get_last_error(); }
       return ret;
-#else
-      return false;
-#endif
     } else {
       ClientImpl cli(next_host.c_str(), next_port);
       cli.copy_settings(*this);
@@ -5053,7 +4687,6 @@ inline std::unique_ptr<Response> ClientImpl::send_with_content_provider(
 
   if (content_type) { req.headers.emplace("Content-Type", content_type); }
 
-#ifdef CPPHTTPLIB_ZLIB_SUPPORT
   if (compress_) {
     detail::gzip_compressor compressor;
 
@@ -5099,7 +4732,6 @@ inline std::unique_ptr<Response> ClientImpl::send_with_content_provider(
 
     req.headers.emplace("Content-Encoding", "gzip");
   } else
-#endif
   {
     if (content_provider) {
       req.content_length = content_length;
@@ -5109,7 +4741,7 @@ inline std::unique_ptr<Response> ClientImpl::send_with_content_provider(
     }
   }
 
-  auto res = detail::make_unique<Response>();
+  auto res = std::make_unique<Response>();
 
   return send(req, *res) ? std::move(res) : nullptr;
 }
@@ -5211,7 +4843,7 @@ inline Result ClientImpl::Get(const char *path, const Headers &headers,
   req.headers.insert(headers.begin(), headers.end());
   req.progress = std::move(progress);
 
-  auto res = detail::make_unique<Response>();
+  auto res = std::make_unique<Response>();
   auto ret = send(req, *res);
   return Result{ret ? std::move(res) : nullptr, get_last_error()};
 }
@@ -5279,7 +4911,7 @@ inline Result ClientImpl::Get(const char *path, const Headers &headers,
       };
   req.progress = std::move(progress);
 
-  auto res = detail::make_unique<Response>();
+  auto res = std::make_unique<Response>();
   auto ret = send(req, *res);
   return Result{ret ? std::move(res) : nullptr, get_last_error()};
 }
@@ -5295,7 +4927,7 @@ inline Result ClientImpl::Head(const char *path, const Headers &headers) {
   req.headers.insert(headers.begin(), headers.end());
   req.path = path;
 
-  auto res = detail::make_unique<Response>();
+  auto res = std::make_unique<Response>();
   auto ret = send(req, *res);
   return Result{ret ? std::move(res) : nullptr, get_last_error()};
 }
@@ -5485,7 +5117,7 @@ inline Result ClientImpl::Delete(const char *path, const Headers &headers,
   if (content_type) { req.headers.emplace("Content-Type", content_type); }
   req.body = body;
 
-  auto res = detail::make_unique<Response>();
+  auto res = std::make_unique<Response>();
   auto ret = send(req, *res);
   return Result{ret ? std::move(res) : nullptr, get_last_error()};
 }
@@ -5501,7 +5133,7 @@ inline Result ClientImpl::Options(const char *path, const Headers &headers) {
   req.headers.insert(headers.begin(), headers.end());
   req.path = path;
 
-  auto res = detail::make_unique<Response>();
+  auto res = std::make_unique<Response>();
   auto ret = send(req, *res);
   return Result{ret ? std::move(res) : nullptr, get_last_error()};
 }
@@ -5551,13 +5183,11 @@ inline void ClientImpl::set_bearer_token_auth(const char *token) {
   bearer_token_auth_token_ = token;
 }
 
-#ifdef CPPHTTPLIB_OPENSSL_SUPPORT
 inline void ClientImpl::set_digest_auth(const char *username,
                                         const char *password) {
   digest_auth_username_ = username;
   digest_auth_password_ = password;
 }
-#endif
 
 inline void ClientImpl::set_keep_alive(bool on) { keep_alive_ = on; }
 
@@ -5594,19 +5224,15 @@ inline void ClientImpl::set_proxy_bearer_token_auth(const char *token) {
   proxy_bearer_token_auth_token_ = token;
 }
 
-#ifdef CPPHTTPLIB_OPENSSL_SUPPORT
 inline void ClientImpl::set_proxy_digest_auth(const char *username,
                                               const char *password) {
   proxy_digest_auth_username_ = username;
   proxy_digest_auth_password_ = password;
 }
-#endif
 
-#ifdef CPPHTTPLIB_OPENSSL_SUPPORT
 inline void ClientImpl::enable_server_certificate_verification(bool enabled) {
   server_certificate_verification_ = enabled;
 }
-#endif
 
 inline void ClientImpl::set_logger(Logger logger) {
   logger_ = std::move(logger);
@@ -5615,7 +5241,6 @@ inline void ClientImpl::set_logger(Logger logger) {
 /*
  * SSL Implementation
  */
-#ifdef CPPHTTPLIB_OPENSSL_SUPPORT
 namespace detail {
 
 template <typename U, typename V>
@@ -5711,55 +5336,17 @@ process_client_socket_ssl(SSL *ssl, socket_t sock, time_t read_timeout_sec,
   return callback(strm);
 }
 
-#if OPENSSL_VERSION_NUMBER < 0x10100000L
-static std::shared_ptr<std::vector<std::mutex>> openSSL_locks_;
-
-class SSLThreadLocks {
-public:
-  SSLThreadLocks() {
-    openSSL_locks_ =
-        std::make_shared<std::vector<std::mutex>>(CRYPTO_num_locks());
-    CRYPTO_set_locking_callback(locking_callback);
-  }
-
-  ~SSLThreadLocks() { CRYPTO_set_locking_callback(nullptr); }
-
-private:
-  static void locking_callback(int mode, int type, const char * /*file*/,
-                               int /*line*/) {
-    auto &lk = (*openSSL_locks_)[static_cast<size_t>(type)];
-    if (mode & CRYPTO_LOCK) {
-      lk.lock();
-    } else {
-      lk.unlock();
-    }
-  }
-};
-
-#endif
-
 class SSLInit {
 public:
   SSLInit() {
-#if OPENSSL_VERSION_NUMBER < 0x1010001fL
-    SSL_load_error_strings();
-    SSL_library_init();
-#else
     OPENSSL_init_ssl(
         OPENSSL_INIT_LOAD_SSL_STRINGS | OPENSSL_INIT_LOAD_CRYPTO_STRINGS, NULL);
-#endif
   }
 
   ~SSLInit() {
-#if OPENSSL_VERSION_NUMBER < 0x1010001fL
-    ERR_free_strings();
-#endif
   }
 
 private:
-#if OPENSSL_VERSION_NUMBER < 0x10100000L
-  SSLThreadLocks thread_init_;
-#endif
 };
 
 // SSL socket stream implementation
@@ -6077,11 +5664,7 @@ inline bool SSLClient::load_certs() {
         ret = false;
       }
     } else {
-#ifdef _WIN32
-      detail::load_system_certs_on_windows(SSL_CTX_get_cert_store(ctx_));
-#else
       SSL_CTX_set_default_verify_paths(ctx_);
-#endif
     }
   });
 
@@ -6201,7 +5784,6 @@ SSLClient::verify_host_with_subject_alt_name(X509 *server_cert) const {
   struct in_addr addr;
   size_t addr_len = 0;
 
-#ifndef __MINGW32__
   if (inet_pton(AF_INET6, host_.c_str(), &addr6)) {
     type = GEN_IPADD;
     addr_len = sizeof(struct in6_addr);
@@ -6209,7 +5791,6 @@ SSLClient::verify_host_with_subject_alt_name(X509 *server_cert) const {
     type = GEN_IPADD;
     addr_len = sizeof(struct in_addr);
   }
-#endif
 
   auto alt_names = static_cast<const struct stack_st_GENERAL_NAME *>(
       X509_get_ext_d2i(server_cert, NID_subject_alt_name, nullptr, nullptr));
@@ -6289,7 +5870,6 @@ inline bool SSLClient::check_host_name(const char *pattern,
 
   return true;
 }
-#endif
 
 // Universal client implementation
 inline Client::Client(const char *scheme_host_port)
@@ -6304,11 +5884,7 @@ inline Client::Client(const char *scheme_host_port,
   if (std::regex_match(scheme_host_port, m, re)) {
     auto scheme = m[1].str();
 
-#ifdef CPPHTTPLIB_OPENSSL_SUPPORT
     if (!scheme.empty() && (scheme != "http" && scheme != "https")) {
-#else
-    if (!scheme.empty() && scheme != "http") {
-#endif
       std::string msg = "'" + scheme + "' scheme is not supported.";
       throw std::invalid_argument(msg);
       return;
@@ -6322,28 +5898,26 @@ inline Client::Client(const char *scheme_host_port,
     auto port = !port_str.empty() ? std::stoi(port_str) : (is_ssl ? 443 : 80);
 
     if (is_ssl) {
-#ifdef CPPHTTPLIB_OPENSSL_SUPPORT
-      cli_ = detail::make_unique<SSLClient>(host.c_str(), port,
+      cli_ = std::make_unique<SSLClient>(host.c_str(), port,
                                             client_cert_path, client_key_path);
       is_ssl_ = is_ssl;
-#endif
     } else {
-      cli_ = detail::make_unique<ClientImpl>(host.c_str(), port,
+      cli_ = std::make_unique<ClientImpl>(host.c_str(), port,
                                              client_cert_path, client_key_path);
     }
   } else {
-    cli_ = detail::make_unique<ClientImpl>(scheme_host_port, 80,
+    cli_ = std::make_unique<ClientImpl>(scheme_host_port, 80,
                                            client_cert_path, client_key_path);
   }
 }
 
 inline Client::Client(const std::string &host, int port)
-    : cli_(detail::make_unique<ClientImpl>(host, port)) {}
+    : cli_(std::make_unique<ClientImpl>(host, port)) {}
 
 inline Client::Client(const std::string &host, int port,
                       const std::string &client_cert_path,
                       const std::string &client_key_path)
-    : cli_(detail::make_unique<ClientImpl>(host, port, client_cert_path,
+    : cli_(std::make_unique<ClientImpl>(host, port, client_cert_path,
                                            client_key_path)) {}
 
 inline Client::~Client() {}
@@ -6550,12 +6124,10 @@ inline void Client::set_basic_auth(const char *username, const char *password) {
 inline void Client::set_bearer_token_auth(const char *token) {
   cli_->set_bearer_token_auth(token);
 }
-#ifdef CPPHTTPLIB_OPENSSL_SUPPORT
 inline void Client::set_digest_auth(const char *username,
                                     const char *password) {
   cli_->set_digest_auth(username, password);
 }
-#endif
 
 inline void Client::set_keep_alive(bool on) { cli_->set_keep_alive(on); }
 inline void Client::set_follow_location(bool on) {
@@ -6580,22 +6152,17 @@ inline void Client::set_proxy_basic_auth(const char *username,
 inline void Client::set_proxy_bearer_token_auth(const char *token) {
   cli_->set_proxy_bearer_token_auth(token);
 }
-#ifdef CPPHTTPLIB_OPENSSL_SUPPORT
 inline void Client::set_proxy_digest_auth(const char *username,
                                           const char *password) {
   cli_->set_proxy_digest_auth(username, password);
 }
-#endif
 
-#ifdef CPPHTTPLIB_OPENSSL_SUPPORT
 inline void Client::enable_server_certificate_verification(bool enabled) {
   cli_->enable_server_certificate_verification(enabled);
 }
-#endif
 
 inline void Client::set_logger(Logger logger) { cli_->set_logger(logger); }
 
-#ifdef CPPHTTPLIB_OPENSSL_SUPPORT
 inline void Client::set_ca_cert_path(const char *ca_cert_file_path,
                                      const char *ca_cert_dir_path) {
   if (is_ssl_) {
@@ -6621,7 +6188,6 @@ inline SSL_CTX *Client::ssl_context() const {
   if (is_ssl_) { return static_cast<SSLClient &>(*cli_).ssl_context(); }
   return nullptr;
 }
-#endif
 
 // ----------------------------------------------------------------------------
 
