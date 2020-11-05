@@ -547,8 +547,14 @@ private:
                                       const HandlersForContentReader &handlers);
 
   bool parse_request_line(const char *s, Request &req);
+  void apply_ranges(const Request &req, Response &res,
+                    std::string &content_type, std::string &boundary);
   bool write_response(Stream &strm, bool close_connection, const Request &req,
                       Response &res);
+  bool write_response_with_content(Stream &strm, bool close_connection,
+                                   const Request &req, Response &res,
+                                   std::string &content_type,
+                                   std::string &boundary);
   bool write_content_with_provider(Stream &strm, const Request &req,
                                    Response &res, const std::string &boundary,
                                    const std::string &content_type);
@@ -2910,9 +2916,7 @@ get_range_offset_and_length(const Request &req, size_t content_length,
     r.second = slen - 1;
   }
 
-  if (r.second == -1) {
-    r.second = slen - 1;
-  }
+  if (r.second == -1) { r.second = slen - 1; }
   return std::make_pair(r.first, static_cast<size_t>(r.second - r.first) + 1);
 }
 
@@ -2962,21 +2966,21 @@ bool process_multipart_ranges_data(const Request &req, Response &res,
   return true;
 }
 
-inline std::string make_multipart_ranges_data(const Request &req, Response &res,
-                                              const std::string &boundary,
-                                              const std::string &content_type) {
-  std::string data;
-
-  process_multipart_ranges_data(
+inline bool make_multipart_ranges_data(const Request &req, Response &res,
+                                       const std::string &boundary,
+                                       const std::string &content_type,
+                                       std::string &data) {
+  return process_multipart_ranges_data(
       req, res, boundary, content_type,
       [&](const std::string &token) { data += token; },
       [&](const char *token) { data += token; },
       [&](size_t offset, size_t length) {
-        data += res.body.substr(offset, length);
-        return true;
+        if (offset < res.body.size()) {
+          data += res.body.substr(offset, length);
+          return true;
+        }
+        return false;
       });
-
-  return data;
 }
 
 inline size_t
@@ -3670,17 +3674,18 @@ inline bool Server::parse_request_line(const char *s, Request &req) {
 
 inline bool Server::write_response(Stream &strm, bool close_connection,
                                    const Request &req, Response &res) {
+  std::string content_type;
+  std::string boundary;
+  return write_response_with_content(strm, close_connection, req, res,
+                                     content_type, boundary);
+}
+
+inline bool Server::write_response_with_content(
+    Stream &strm, bool close_connection, const Request &req, Response &res,
+    std::string &content_type, std::string &boundary) {
   assert(res.status != -1);
 
   if (400 <= res.status && error_handler_) { error_handler_(req, res); }
-
-  detail::BufferStream bstrm;
-
-  // Response line
-  if (!bstrm.write_format("HTTP/1.1 %d %s\r\n", res.status,
-                          detail::status_message(res.status))) {
-    return false;
-  }
 
   // Headers
   if (close_connection || req.get_header_value("Connection") == "close") {
@@ -3697,105 +3702,21 @@ inline bool Server::write_response(Stream &strm, bool close_connection,
     res.set_header("Content-Type", "text/plain");
   }
 
+  if (!res.has_header("Content-Length") && res.body.empty() &&
+      !res.content_length_ && !res.content_provider_) {
+    res.set_header("Content-Length", "0");
+  }
+
   if (!res.has_header("Accept-Ranges") && req.method == "HEAD") {
     res.set_header("Accept-Ranges", "bytes");
   }
 
-  std::string content_type;
-  std::string boundary;
+  detail::BufferStream bstrm;
 
-  if (req.ranges.size() > 1) {
-    boundary = detail::make_multipart_data_boundary();
-
-    auto it = res.headers.find("Content-Type");
-    if (it != res.headers.end()) {
-      content_type = it->second;
-      res.headers.erase(it);
-    }
-
-    res.headers.emplace("Content-Type",
-                        "multipart/byteranges; boundary=" + boundary);
-  }
-
-  auto type = detail::encoding_type(req, res);
-
-  if (res.body.empty()) {
-    if (res.content_length_ > 0) {
-      size_t length = 0;
-      if (req.ranges.empty()) {
-        length = res.content_length_;
-      } else if (req.ranges.size() == 1) {
-        auto offsets =
-            detail::get_range_offset_and_length(req, res.content_length_, 0);
-        auto offset = offsets.first;
-        length = offsets.second;
-        auto content_range = detail::make_content_range_header_field(
-            offset, length, res.content_length_);
-        res.set_header("Content-Range", content_range);
-      } else {
-        length = detail::get_multipart_ranges_data_length(req, res, boundary,
-                                                          content_type);
-      }
-      res.set_header("Content-Length", std::to_string(length));
-    } else {
-      if (res.content_provider_) {
-        if (res.is_chunked_content_provider) {
-          res.set_header("Transfer-Encoding", "chunked");
-          if (type == detail::EncodingType::Gzip) {
-            res.set_header("Content-Encoding", "gzip");
-          } else if (type == detail::EncodingType::Brotli) {
-            res.set_header("Content-Encoding", "br");
-          }
-        }
-      } else {
-        res.set_header("Content-Length", "0");
-      }
-    }
-  } else {
-    if (req.ranges.empty()) {
-      ;
-    } else if (req.ranges.size() == 1) {
-      auto offsets =
-          detail::get_range_offset_and_length(req, res.body.size(), 0);
-      auto offset = offsets.first;
-      auto length = offsets.second;
-      auto content_range = detail::make_content_range_header_field(
-          offset, length, res.body.size());
-      res.set_header("Content-Range", content_range);
-      res.body = res.body.substr(offset, length);
-    } else {
-      res.body =
-          detail::make_multipart_ranges_data(req, res, boundary, content_type);
-    }
-
-    if (type != detail::EncodingType::None) {
-      std::unique_ptr<detail::compressor> compressor;
-
-      if (type == detail::EncodingType::Gzip) {
-        compressor = std::make_unique<detail::gzip_compressor>();
-        res.set_header("Content-Encoding", "gzip");
-      } else if (type == detail::EncodingType::Brotli) {
-        compressor = std::make_unique<detail::brotli_compressor>();
-        res.set_header("Content-Encoding", "brotli");
-      }
-
-      if (compressor) {
-        std::string compressed;
-
-        if (!compressor->compress(res.body.data(), res.body.size(), true,
-                                  [&](const char *data, size_t data_len) {
-                                    compressed.append(data, data_len);
-                                    return true;
-                                  })) {
-          return false;
-        }
-
-        res.body.swap(compressed);
-      }
-    }
-
-    auto length = std::to_string(res.body.size());
-    res.set_header("Content-Length", length);
+  // Response line
+  if (!bstrm.write_format("HTTP/1.1 %d %s\r\n", res.status,
+                          detail::status_message(res.status))) {
+    return false;
   }
 
   if (!detail::write_headers(bstrm, res, Headers())) { return false; }
@@ -4183,6 +4104,116 @@ inline bool Server::dispatch_request(Request &req, Response &res,
   return false;
 }
 
+inline void Server::apply_ranges(const Request &req, Response &res,
+                                 std::string &content_type,
+                                 std::string &boundary) {
+  if (req.ranges.size() > 1) {
+    boundary = detail::make_multipart_data_boundary();
+
+    auto it = res.headers.find("Content-Type");
+    if (it != res.headers.end()) {
+      content_type = it->second;
+      res.headers.erase(it);
+    }
+
+    res.headers.emplace("Content-Type",
+                        "multipart/byteranges; boundary=" + boundary);
+  }
+
+  auto type = detail::encoding_type(req, res);
+
+  if (res.body.empty()) {
+    if (res.content_length_ > 0) {
+      size_t length = 0;
+      if (req.ranges.empty()) {
+        length = res.content_length_;
+      } else if (req.ranges.size() == 1) {
+        auto offsets =
+            detail::get_range_offset_and_length(req, res.content_length_, 0);
+        auto offset = offsets.first;
+        length = offsets.second;
+        auto content_range = detail::make_content_range_header_field(
+            offset, length, res.content_length_);
+        res.set_header("Content-Range", content_range);
+      } else {
+        length = detail::get_multipart_ranges_data_length(req, res, boundary,
+                                                          content_type);
+      }
+      res.set_header("Content-Length", std::to_string(length));
+    } else {
+      if (res.content_provider_) {
+        if (res.is_chunked_content_provider) {
+          res.set_header("Transfer-Encoding", "chunked");
+          if (type == detail::EncodingType::Gzip) {
+            res.set_header("Content-Encoding", "gzip");
+          } else if (type == detail::EncodingType::Brotli) {
+            res.set_header("Content-Encoding", "br");
+          }
+        }
+      }
+    }
+  } else {
+    if (req.ranges.empty()) {
+      ;
+    } else if (req.ranges.size() == 1) {
+      auto offsets =
+          detail::get_range_offset_and_length(req, res.body.size(), 0);
+      auto offset = offsets.first;
+      auto length = offsets.second;
+      auto content_range = detail::make_content_range_header_field(
+          offset, length, res.body.size());
+      res.set_header("Content-Range", content_range);
+      if (offset < res.body.size()) {
+        res.body = res.body.substr(offset, length);
+      } else {
+        res.body.clear();
+        res.status = 416;
+      }
+    } else {
+      std::string data;
+      if (detail::make_multipart_ranges_data(req, res, boundary, content_type,
+                                             data)) {
+        res.body.swap(data);
+      } else {
+        res.body.clear();
+        res.status = 416;
+      }
+    }
+
+    if (type != detail::EncodingType::None) {
+      std::unique_ptr<detail::compressor> compressor;
+      std::string content_encoding;
+
+      if (type == detail::EncodingType::Gzip) {
+#ifdef CPPHTTPLIB_ZLIB_SUPPORT
+        compressor = detail::make_unique<detail::gzip_compressor>();
+        content_encoding = "gzip";
+#endif
+      } else if (type == detail::EncodingType::Brotli) {
+#ifdef CPPHTTPLIB_BROTLI_SUPPORT
+        compressor = detail::make_unique<detail::brotli_compressor>();
+        content_encoding = "brotli";
+#endif
+      }
+
+      if (compressor) {
+        std::string compressed;
+        if (compressor->compress(res.body.data(), res.body.size(), true,
+                                 [&](const char *data, size_t data_len) {
+                                   compressed.append(data, data_len);
+                                   return true;
+                                 })) {
+          res.body.swap(compressed);
+          res.set_header("Content-Encoding", content_encoding);
+        }
+      }
+    }
+
+    auto length = std::to_string(res.body.size());
+    res.set_header("Content-Length", length);
+  }
+}
+
 inline bool Server::dispatch_request_for_content_reader(
     Request &req, Response &res, ContentReader content_reader,
     const HandlersForContentReader &handlers) {
@@ -4274,7 +4305,12 @@ Server::process_request(Stream &strm, bool close_connection,
     if (res.status == -1) { res.status = 404; }
   }
 
-  return write_response(strm, close_connection, req, res);
+  std::string content_type;
+  std::string boundary;
+  apply_ranges(req, res, content_type, boundary);
+
+  return write_response_with_content(strm, close_connection, req, res,
+                                     content_type, boundary);
 }
 
 inline bool Server::is_valid() const { return true; }
@@ -5285,25 +5321,21 @@ inline void ssl_delete(std::mutex &ctx_mutex, SSL *ssl,
 }
 
 template <typename U>
-bool   ssl_connect_or_accept_nonblocking(socket_t sock, SSL *ssl, U ssl_connect_or_accept,
-                                time_t timeout_sec, time_t timeout_usec) {
+bool ssl_connect_or_accept_nonblocking(socket_t sock, SSL *ssl,
+                                       U ssl_connect_or_accept,
+                                       time_t timeout_sec,
+                                       time_t timeout_usec) {
   int res = 0;
   while ((res = ssl_connect_or_accept(ssl)) != 1) {
     auto err = SSL_get_error(ssl, res);
-    switch (err)
-    {
+    switch (err) {
     case SSL_ERROR_WANT_READ:
-      if (select_read(sock, timeout_sec, timeout_usec) > 0) {
-        continue;
-      }
+      if (select_read(sock, timeout_sec, timeout_usec) > 0) { continue; }
       break;
     case SSL_ERROR_WANT_WRITE:
-      if (select_write(sock, timeout_sec, timeout_usec) > 0) {
-        continue;
-      }
+      if (select_write(sock, timeout_sec, timeout_usec) > 0) { continue; }
       break;
-    default:
-      break;
+    default: break;
     }
     return false;
   }
@@ -5385,9 +5417,7 @@ inline ssize_t SSLSocketStream::read(char *ptr, size_t size) {
           return SSL_read(ssl_, ptr, static_cast<int>(size));
         } else if (is_readable()) {
           ret = SSL_read(ssl_, ptr, static_cast<int>(size));
-          if (ret >= 0) {
-            return ret;
-          }
+          if (ret >= 0) { return ret; }
           err = SSL_get_error(ssl_, ret);
         } else {
           return -1;
@@ -5489,11 +5519,10 @@ inline bool SSLServer::process_and_close_socket(socket_t sock) {
   auto ssl = detail::ssl_new(
       sock, ctx_, ctx_mutex_,
       [&](SSL *ssl) {
-        return detail::  ssl_connect_or_accept_nonblocking(sock, ssl, SSL_accept, read_timeout_sec_, read_timeout_usec_);
+        return detail::ssl_connect_or_accept_nonblocking(
+            sock, ssl, SSL_accept, read_timeout_sec_, read_timeout_usec_);
       },
-      [](SSL * /*ssl*/) {
-        return true;
-      });
+      [](SSL * /*ssl*/) { return true; });
 
   if (ssl) {
     auto ret = detail::process_server_socket_ssl(
@@ -5683,8 +5712,9 @@ inline bool SSLClient::initialize_ssl(Socket &socket) {
           SSL_set_verify(ssl, SSL_VERIFY_NONE, nullptr);
         }
 
-        if (!detail::  ssl_connect_or_accept_nonblocking(socket.sock, ssl, SSL_connect,
-                           connection_timeout_sec_, connection_timeout_usec_)) {
+        if (!detail::ssl_connect_or_accept_nonblocking(
+                socket.sock, ssl, SSL_connect, connection_timeout_sec_,
+                connection_timeout_usec_)) {
           error_ = Error::SSLConnection;
           return false;
         }
